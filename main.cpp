@@ -813,13 +813,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	descriptorRange[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	descriptorRange[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+
+	D3D12_DESCRIPTOR_RANGE descriptorRangeForInstancing[1] = {};
+	descriptorRangeForInstancing[0].BaseShaderRegister = 0;
+	descriptorRangeForInstancing[0].NumDescriptors = 1;
+	descriptorRangeForInstancing[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	descriptorRangeForInstancing[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
 	D3D12_ROOT_PARAMETER rootParameters[4] = {};
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
 	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 	rootParameters[0].Descriptor.ShaderRegister = 0;
-	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-	rootParameters[1].Descriptor.ShaderRegister = 0;
+	rootParameters[1].DescriptorTable.pDescriptorRanges = descriptorRangeForInstancing;
+	rootParameters[1].DescriptorTable.NumDescriptorRanges = _countof(descriptorRangeForInstancing);
+	rootParameters[1].Descriptor.ShaderRegister = 1;
 	rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 	rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 	rootParameters[2].DescriptorTable.pDescriptorRanges = descriptorRange;
@@ -884,10 +893,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
 	rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
 
-	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Resource/Shaders/Object3d.VS.hlsl",
+	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Resource/Shaders/Particle.VS.hlsl",
 		L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
 	assert(vertexShaderBlob != nullptr);
-	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Resource/Shaders/Object3d.PS.hlsl",
+	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Resource/Shaders/Particle.PS.hlsl",
 		L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
 	assert(pixelShaderBlob != nullptr);
 
@@ -946,15 +955,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 	);
 
 	////////////////////////////////////
+	const uint32_t kNumInstace = 10;
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
+	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix) * kNumInstace);
 
 	TransformationMatrix* wvpData = nullptr;
 
 	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
-
-	*wvpData = TransformationMatrix({ MakeIdentity4x4() });
-
+	for (int i = 0; i < kNumInstace; i++) {
+		wvpData[i] = TransformationMatrix(MakeIdentity4x4(), MakeIdentity4x4());
+	}
 
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResource = CreateBufferResource(device, sizeof(Material));
@@ -970,29 +980,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		};
 	materialData->uvTransform = MakeIdentity4x4();
 
-	//
-	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResource2 = CreateBufferResource(device, sizeof(TransformationMatrix));
-
-	TransformationMatrix* wvpData2 = nullptr;
-
-	wvpResource2->Map(0, nullptr, reinterpret_cast<void**>(&wvpData2));
-
-	*wvpData2 = TransformationMatrix({ MakeIdentity4x4() });
-
-
-
-	Microsoft::WRL::ComPtr<ID3D12Resource> materialResource2 = CreateBufferResource(device, sizeof(Material));
-
-	Material* materialData2 = nullptr;
-
-	materialResource2->Map(0, nullptr, reinterpret_cast<void**>(&materialData2));
-
-	*materialData2 =
-		Material{
-			.color{ 1.0f, 1.0f, 1.0f, 1.0f },
-			.enableLighting{2},
-	};
-	materialData2->uvTransform = MakeIdentity4x4();
+	
 
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResourceSprite = CreateBufferResource(device, sizeof(Material));
@@ -1008,125 +996,45 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		};
 	materialDataSprite->uvTransform = MakeIdentity4x4();
 
-	/////////////////////////////////
+	//////////////////////////////
 
-	ModelData teapotModelData = LoadObjFile("resource", "teapot.obj");
-	ModelData bunnyModelData = LoadObjFile("resource", "bunny.obj");
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource;
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferView;
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource[3];
-	D3D12_VERTEX_BUFFER_VIEW vertexBufferView[3];
-	
-
-	const uint32_t kSubivision = 20;
-
-	vertexResource[0] = CreateBufferResource(device, sizeof(VertexData) * kSubivision * kSubivision * 6);
+	vertexResource = CreateBufferResource(device, sizeof(VertexData) * 6);
 
 	
-	vertexBufferView[0].BufferLocation = vertexResource[0]->GetGPUVirtualAddress();
-	vertexBufferView[0].SizeInBytes = sizeof(VertexData) * kSubivision * kSubivision * 6;
-	vertexBufferView[0].StrideInBytes = sizeof(VertexData);
+	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
+	vertexBufferView.SizeInBytes = sizeof(VertexData) * 6;
+	vertexBufferView.StrideInBytes = sizeof(VertexData);
 
 	VertexData* vertexData;
-	vertexResource[0]->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
+	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
 
-	const float pi = std::numbers::pi_v<float>;
-	const float kLonEvery = pi * 2.0f / static_cast<float>(kSubivision);
-	const float kLatEvery = pi / static_cast<float>(kSubivision);
-
-	for (uint32_t i = 0; i < kSubivision; ++i) {
-		float lat = -pi / 2.0f + kLatEvery * i;
-		for (uint32_t j = 0; j < kSubivision; ++j) {
-			float lon = j * kLonEvery;
-			Vector4 a = {
-				std::cos(lat) * std::cos(lon),
-				std::sin(lat),
-				std::cos(lat) * std::sin(lon),
-				1.0f
-			};
-			Vector4 b = {
-				std::cos(lat + kLatEvery) * std::cos(lon),
-				std::sin(lat + kLatEvery),
-				std::cos(lat + kLatEvery) * std::sin(lon),
-				1.0f
-			};
-			Vector4 c = {
-				std::cos(lat) * std::cos(lon + kLonEvery),
-				std::sin(lat),
-				std::cos(lat) * std::sin(lon + kLonEvery),
-				1.0f
-			};
-			Vector4 d = {
-				std::cos(lat + kLatEvery) * std::cos(lon + kLonEvery),
-				std::sin(lat + kLatEvery),
-				std::cos(lat + kLatEvery) * std::sin(lon + kLonEvery),
-				1.0f
-			};
-
-			uint32_t start = (i * kSubivision + j) * 6;
-
-			float u = float(j) / float(kSubivision);
-			float v = 1.0f - float(i) / float(kSubivision);
-
-			float u2 = float(j + 1) / float(kSubivision);
-			float v2 = 1.0f - float(i + 1) / float(kSubivision);
-
-			vertexData[start].position = a;
-			vertexData[start].texcoord = { u,v };
-			vertexData[start].normal.x = a.x;
-			vertexData[start].normal.y = a.y;
-			vertexData[start].normal.z = a.z;
-			vertexData[start + 1].position = b;
-			vertexData[start + 1].texcoord = { u,v2 };
-			vertexData[start + 1].normal.x = b.x;
-			vertexData[start + 1].normal.y = b.y;
-			vertexData[start + 1].normal.z = b.z;
-			vertexData[start + 2].position = c;
-			vertexData[start + 2].texcoord = { u2,v };
-			vertexData[start + 2].normal.x = c.x;
-			vertexData[start + 2].normal.y = c.y;
-			vertexData[start + 2].normal.z = c.z;
-
-			vertexData[start + 3].position = c;
-			vertexData[start + 3].texcoord = { u2,v };
-			vertexData[start + 3].normal.x = c.x;
-			vertexData[start + 3].normal.y = c.y;
-			vertexData[start + 3].normal.z = c.z;
-			vertexData[start + 4].position = b;
-			vertexData[start + 4].texcoord = { u,v2 };
-			vertexData[start + 4].normal.x = b.x;
-			vertexData[start + 4].normal.y = b.y;
-			vertexData[start + 4].normal.z = b.z;
-			vertexData[start + 5].position = d;
-			vertexData[start + 5].texcoord = { u2,v2 };
-			vertexData[start + 5].normal.x = d.x;
-			vertexData[start + 5].normal.y = d.y;
-			vertexData[start + 5].normal.z = d.z;
-
-		}
-	}
-	vertexResource[1] = CreateBufferResource(device, sizeof(VertexData) * teapotModelData.vertices.size());
-	
-
-	vertexBufferView[1].BufferLocation = vertexResource[1]->GetGPUVirtualAddress();
-	vertexBufferView[1].SizeInBytes = UINT(sizeof(VertexData) * teapotModelData.vertices.size());
-	vertexBufferView[1].StrideInBytes = sizeof(VertexData);
-
-	VertexData* teapotVertexData;
-	vertexResource[1]->Map(0, nullptr, reinterpret_cast<void**>(&teapotVertexData));
-	std::memcpy(teapotVertexData, teapotModelData.vertices.data(), sizeof(VertexData) * teapotModelData.vertices.size());
-
-	vertexResource[2] = CreateBufferResource(device, sizeof(VertexData) * bunnyModelData.vertices.size());
-
-
-	vertexBufferView[2].BufferLocation = vertexResource[2]->GetGPUVirtualAddress();
-	vertexBufferView[2].SizeInBytes = UINT(sizeof(VertexData) * bunnyModelData.vertices.size());
-	vertexBufferView[2].StrideInBytes = sizeof(VertexData);
-
-	VertexData* bunnyVertexData;
-	vertexResource[2]->Map(0, nullptr, reinterpret_cast<void**>(&bunnyVertexData));
-	std::memcpy(bunnyVertexData, bunnyModelData.vertices.data(), sizeof(VertexData) * bunnyModelData.vertices.size());
-
-
+	//左上
+	vertexData[0].position = { 0.0f,0.0f,0.0f,1.0f };
+	vertexData[0].texcoord = { 0.0f,0.0f };
+	vertexData[0].normal = { 0.0f,0.0f,-1.0f };
+	//右上
+	vertexData[1].position = { 2.0f,0.0f,0.0f,1.0f };
+	vertexData[1].texcoord = { 1.0f,0.0f };
+	vertexData[1].normal = { 0.0f,0.0f,-1.0f };
+	//左下
+	vertexData[2].position = { 0.0f,-2.0f,0.0f,1.0f };
+	vertexData[2].texcoord = { 0.0f,1.0f };
+	vertexData[2].normal = { 0.0f,0.0f,-1.0f };
+	//右下
+	vertexData[3].position = { 2.0f,-2.0f,0.0f,1.0f };
+	vertexData[3].texcoord = { 1.0f,1.0f };
+	vertexData[3].normal = { 0.0f,0.0f,-1.0f };
+	//左下
+	vertexData[4].position = { 0.0f,-2.0f,0.0f,1.0f };
+	vertexData[4].texcoord = { 0.0f,1.0f };
+	vertexData[4].normal = { 0.0f,0.0f,-1.0f };
+	//右上
+	vertexData[5].position = { 2.0f,0.0f,0.0f,1.0f };
+	vertexData[5].texcoord = { 1.0f,0.0f };
+	vertexData[5].normal = { 0.0f,0.0f,-1.0f };
 
 	///////////////////////////////////////
 	Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
@@ -1139,17 +1047,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 		{ 0.0f,-1.0f,0.0f },
 		1.0f
 	);
-
-	Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource2 = CreateBufferResource(device, sizeof(DirectionalLight));
-
-	DirectionalLight* directionalLightResource2Data = nullptr;
-	directionalLightResource2->Map(0, nullptr, reinterpret_cast<void**>(&directionalLightResource2Data));
-
-	*directionalLightResource2Data = DirectionalLight(
-		{ 1.0f,1.0f,1.0f,1.0f },
-		{ 0.0f,-1.0f,0.0f },
-		1.0f
-	);
+;
 
 	//Sprite////////////////////////////////
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 4);
@@ -1237,54 +1135,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
 	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPU = GetCPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 1);
 	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU = GetGPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 1);
-
 	device->CreateShaderResourceView(textureResource.Get(), &srvDesc, textureSrvHandleCPU);
+	
 
-	DirectX::ScratchImage teapotMipImages = LoadTexture(teapotModelData.material.textureFilePath);
-	const DirectX::TexMetadata& teapotMetadata = teapotMipImages.GetMetadata();
-	Microsoft::WRL::ComPtr<ID3D12Resource> teapotTextureResource = CreateTextureResource(device, teapotMetadata);
-	Microsoft::WRL::ComPtr<ID3D12Resource> teapotIntermediateResource = UploadTextureData(teapotTextureResource.Get(), teapotMipImages, device, commandList.Get());
+	D3D12_SHADER_RESOURCE_VIEW_DESC instancingSrvDesc{};
+	instancingSrvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	instancingSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	instancingSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	instancingSrvDesc.Buffer.FirstElement = 0;
+	instancingSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+	instancingSrvDesc.Buffer.NumElements = kNumInstace;
+	instancingSrvDesc.Buffer.StructureByteStride = sizeof(TransformationMatrix);
 
+	D3D12_CPU_DESCRIPTOR_HANDLE instancingSrvHandleCPU = GetCPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
+	D3D12_GPU_DESCRIPTOR_HANDLE instancingSrvHandleGPU = GetGPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
 
+	device->CreateShaderResourceView(wvpResource.Get(), &instancingSrvDesc, instancingSrvHandleCPU);
 
-	D3D12_SHADER_RESOURCE_VIEW_DESC teapotSrvDesc{};
-	teapotSrvDesc.Format = teapotMetadata.format;
-	teapotSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	teapotSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	teapotSrvDesc.Texture2D.MipLevels = UINT(teapotMetadata.mipLevels);
-
-
-
-	D3D12_CPU_DESCRIPTOR_HANDLE teapotTextureSrvHandleCPU = GetCPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 2);
-	D3D12_GPU_DESCRIPTOR_HANDLE teapotTextureSrvHandleGPU = GetGPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 2);
-
-	device->CreateShaderResourceView(teapotTextureResource.Get(), &teapotSrvDesc, teapotTextureSrvHandleCPU);
-
-
-	DirectX::ScratchImage bunnyMipImages = LoadTexture(bunnyModelData.material.textureFilePath);
-	const DirectX::TexMetadata& bunnyMetadata = bunnyMipImages.GetMetadata();
-	Microsoft::WRL::ComPtr<ID3D12Resource> bunnyTextureResource = CreateTextureResource(device, bunnyMetadata);
-	Microsoft::WRL::ComPtr<ID3D12Resource> bunnyIntermediateResource = UploadTextureData(bunnyTextureResource.Get(), bunnyMipImages, device, commandList.Get());
-
-
-
-	D3D12_SHADER_RESOURCE_VIEW_DESC bunnySrvDesc{};
-	bunnySrvDesc.Format = bunnyMetadata.format;
-	bunnySrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	bunnySrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-	bunnySrvDesc.Texture2D.MipLevels = UINT(bunnyMetadata.mipLevels);
-
-
-
-	D3D12_CPU_DESCRIPTOR_HANDLE bunnyTextureSrvHandleCPU = GetCPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
-	D3D12_GPU_DESCRIPTOR_HANDLE bunnyTextureSrvHandleGPU = GetGPUdescriptorHandle(srvDescriptorHeap.Get(), descriptorSizeSRV, 3);
-
-	device->CreateShaderResourceView(bunnyTextureResource.Get(), &bunnySrvDesc, bunnyTextureSrvHandleCPU);
-
-
-
-	Transform transform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f},{-1.0f,0.0f,0.0f} };
-	Transform transform2{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f},{1.0f,0.0f,0.0f} };
+	Transform transform[kNumInstace];
+	for (int i = 0; i < kNumInstace; i++) {
+		transform[i]={ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f},{i*0.1f,i * 0.1f,i * 0.1f} };
+	}
 	Transform cameraTransform{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f},{0.0f,0.0f,-10.0f} };
 
 	Transform transformSprite{ {1.0f,1.0f,1.0f},{0.0f,0.0f,0.0f},{0.0f,0.0f,0.0f} };
@@ -1336,46 +1207,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
 			ImGui::Begin("Debug");
-			if (ImGui::CollapsingHeader("Object")) {
-				ImGui::Combo("ObjectChange", &index, "Sphere\0Teapot\0Bunny");
-				if (ImGui::TreeNode("Transform")) {
-					ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f);
-
-					ImGui::DragFloat3("Rorate", &transform.rotare.x, 0.01f);
-					
-					ImGui::DragFloat3("Translate", &transform.translate.x, 0.01f);
-
-					ImGui::TreePop();
-				}
-				if (ImGui::TreeNode("Light")) {
-					ImGui::SliderFloat3("LightDirection", &directionalLightResourceData->direction.x, -1.0f, 1.0f);
-					ImGui::ColorEdit3("LightColor", &directionalLightResourceData->color.x);
-					ImGui::DragFloat("Intensity", &directionalLightResourceData->intensity, 0.01f);
-					ImGui::Combo("Lighting", &materialData->enableLighting, "None\0Lambert\0Half Lanbert");
-					
-					ImGui::TreePop();
-				}
-			}
-			if (ImGui::CollapsingHeader("Object2")) {
-				ImGui::Combo("ObjectChange ", &index2, "Sphere\0Teapot\0Bunny");
-				if (ImGui::TreeNode("Transform  ")) {
-					ImGui::DragFloat3("Scale  ", &transform2.scale.x, 0.01f);
-
-					ImGui::DragFloat3("Rorate  ", &transform2.rotare.x, 0.01f);
-
-					ImGui::DragFloat3("Translate  ", &transform2.translate.x, 0.01f);
-
-					ImGui::TreePop();
-				}
-				if (ImGui::TreeNode("Light ")) {
-					ImGui::SliderFloat3("LightDirection", &directionalLightResource2Data->direction.x, -1.0f, 1.0f);
-					ImGui::ColorEdit3("LightColor", &directionalLightResource2Data->color.x);
-					ImGui::DragFloat("Intensity", &directionalLightResource2Data->intensity, 0.01f);
-					ImGui::Combo("Lighting", &materialData2->enableLighting, "None\0Lambert\0Half Lanbert");
-
-					ImGui::TreePop();
-				}
-			}
 			if (ImGui::CollapsingHeader("Sprite")) {
 				ImGui::Checkbox("DrawingSprite", &drawingSprite);
 				if (ImGui::TreeNode("Transform ")) {
@@ -1395,18 +1226,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			ImGui::End();
 			directionalLightResourceData->direction = Normalize(directionalLightResourceData->direction);
 			//transform.rotare.y += 0.01f;
-			Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotare, transform.translate);
-			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotare, cameraTransform.translate);
-			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
-			Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
-			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
 
 			Matrix4x4 worldMatrixSprite = MakeAffineMatrix(transformSprite.scale, transformSprite.rotare, transformSprite.translate);
 			Matrix4x4 viewMatrixSprite = MakeIdentity4x4();
 			Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
 			Matrix4x4 worldViewProjectionMatrixSprite = Multiply(worldMatrixSprite, Multiply(viewMatrixSprite, projectionMatrixSprite));
+			for (int i = 0; i < kNumInstace; i++) {
+				Matrix4x4 worldMatrix = MakeAffineMatrix(transform[i].scale, transform[i].rotare, transform[i].translate);
+				Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotare, cameraTransform.translate);
+				Matrix4x4 viewMatrix = Inverse(cameraMatrix);
+				Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
+				Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
 
-			*wvpData = TransformationMatrix(worldViewProjectionMatrix, worldMatrix);
+				wvpData[i] = TransformationMatrix(worldViewProjectionMatrix, worldMatrix);
+			}
 			*transfomationMatrixDataSprite = TransformationMatrix(worldViewProjectionMatrixSprite, worldMatrixSprite);
 
 
@@ -1415,39 +1248,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			uvTransformMatrix = Multiply(uvTransformMatrix, MakeTranslateMatrix(uvTransform.translate));
 			materialDataSprite->uvTransform = uvTransformMatrix;
 
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferView[index]);
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootDescriptorTable(2, index == 0 ? textureSrvHandleGPU : index == 1 ? teapotTextureSrvHandleGPU : bunnyTextureSrvHandleGPU);
+			//commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootDescriptorTable(1, instancingSrvHandleGPU);
+			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
 
 			ImGui::Render();
-			if (index == 0) {
-				commandList->DrawInstanced(kSubivision * kSubivision * 6, 1, 0, 0);
-			} else if (index == 1) {
-				commandList->DrawInstanced(UINT(teapotModelData.vertices.size()), 1, 0, 0);
-			} else {
-				commandList->DrawInstanced(UINT(bunnyModelData.vertices.size()), 1, 0, 0);
-			}
-
-			worldMatrix = MakeAffineMatrix(transform2.scale, transform2.rotare, transform2.translate);
-			worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
-			*wvpData2 = TransformationMatrix(worldViewProjectionMatrix, worldMatrix);
-
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferView[index2]);
-			commandList->SetGraphicsRootConstantBufferView(0, materialResource2->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootConstantBufferView(1, wvpResource2->GetGPUVirtualAddress());
-			commandList->SetGraphicsRootDescriptorTable(2, index2 == 0 ? textureSrvHandleGPU : index2 == 1 ? teapotTextureSrvHandleGPU : bunnyTextureSrvHandleGPU);
-			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource2->GetGPUVirtualAddress());
-
-			ImGui::Render();
-			if (index2 == 0) {
-				commandList->DrawInstanced(kSubivision * kSubivision * 6, 1, 0, 0);
-			} else if (index2 == 1) {
-				commandList->DrawInstanced(UINT(teapotModelData.vertices.size()), 1, 0, 0);
-			} else {
-				commandList->DrawInstanced(UINT(bunnyModelData.vertices.size()), 1, 0, 0);
-			}
+			commandList->DrawInstanced(6, kNumInstace, 0, 0);
+			/*
 			commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
 			commandList->IASetIndexBuffer(&indexBufferViewSpite);
@@ -1455,7 +1265,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 			if (drawingSprite) {
 				commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-			}
+			}*/
 			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
 
 			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
